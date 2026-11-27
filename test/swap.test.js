@@ -471,6 +471,7 @@ test('hook: /swap stops the prompt with one line, everything else passes', () =>
     const ev = (name, args) => ({ hook_event_name: 'UserPromptExpansion', command_name: name, command_args: args });
     assert.deepEqual(JSON.parse(s.hook(ev('swap', '')).out), { continue: false, stopReason: 'swapped to Work', suppressOutput: true });
     assert.equal(JSON.parse(s.hook(ev('swap', 'status')).out).stopReason, 'on Work, auto swap off');
+    assert.match(JSON.parse(s.hook(ev('swap', 'list')).out).stopReason, /^\n {2}Main\s+saved\n\* Work/, 'tables start on their own line');
     assert.match(JSON.parse(s.hook(ev('swap', 'add x')).out).stopReason, /from a terminal/);
     assert.equal(s.hook(ev('review', '')).out, '');
     assert.equal(s.swap(['hook'], { input: 'not json' }).out, '');

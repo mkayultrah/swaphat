@@ -521,6 +521,7 @@ function hook(raw) {
     if (!/^\/?swap$/i.test(j.command_name || '')) return;
     let msg;
     try { msg = command(String(j.command_args || '').trim().split(/\s+/).filter(Boolean)); } catch (e) { msg = `cant swap: ${e.message}`; }
+    if (msg.includes('\n')) msg = `\n${msg}`;
     process.stdout.write(JSON.stringify({ continue: false, stopReason: msg, suppressOutput: true }));
     return;
   }
