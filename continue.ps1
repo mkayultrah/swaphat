@@ -1,7 +1,7 @@
 param([int]$StartPid = 0, [int]$ClaudePid = 0, [string]$Text = 'continue', [int]$DelayMs = 2500)
 
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$appDir = if ($env:CLAUDE_SWAP_HOME) { $env:CLAUDE_SWAP_HOME } else { $here }
+$appDir = if ($env:SWAPHAT_HOME) { $env:SWAPHAT_HOME } else { $here }
 function Write-SwapLog($m) { Add-Content (Join-Path $appDir 'swap.log') ("{0:s} continue: {1}" -f (Get-Date), $m) }
 
 if (-not $ClaudePid) {
@@ -21,11 +21,11 @@ if (-not $ClaudePid) {
   exit 0
 }
 
-if (-not ('ClaudeSwap.ConIn' -as [type])) {
+if (-not ('Swaphat.ConIn' -as [type])) {
   Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
-namespace ClaudeSwap {
+namespace Swaphat {
   [StructLayout(LayoutKind.Explicit, CharSet = CharSet.Unicode)]
   public struct INPUT_RECORD {
     [FieldOffset(0)] public ushort EventType;
@@ -66,4 +66,4 @@ namespace ClaudeSwap {
 "@
 }
 Start-Sleep -Milliseconds $DelayMs
-Write-SwapLog ("typed into claude {0}: {1}" -f $ClaudePid, [ClaudeSwap.ConIn]::Type([uint32]$ClaudePid, $Text))
+Write-SwapLog ("typed into claude {0}: {1}" -f $ClaudePid, [Swaphat.ConIn]::Type([uint32]$ClaudePid, $Text))

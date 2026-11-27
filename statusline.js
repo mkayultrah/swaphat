@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const APP = process.env.CLAUDE_SWAP_HOME || __dirname;
+const APP = process.env.SWAPHAT_HOME || __dirname;
 const readJson = (p, d) => { try { return JSON.parse(fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, '')); } catch { return d; } };
 const norm = p => {
   const s = path.resolve(String(p).replace(/^~(?=$|[\\/])/, os.homedir())).replace(/[\\/]+$/, '');

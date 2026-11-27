@@ -7,7 +7,7 @@ const path = require('path');
 const HOME = os.homedir();
 const SRC = __dirname;
 const FILES = ['swap.js', 'statusline.js', 'continue.ps1'];
-const MARK = '<!-- claude-swap -->';
+const MARK = '<!-- swaphat -->';
 
 function parseArgs(argv) {
   const o = { names: null, secondDir: null, statusline: null, uninstall: false, help: false };
@@ -26,7 +26,7 @@ function parseArgs(argv) {
   return o;
 }
 
-const appDir = () => process.env.CLAUDE_SWAP_HOME || path.join(HOME, '.claude-swap');
+const appDir = () => process.env.SWAPHAT_HOME || path.join(HOME, '.swaphat');
 const expand = p => path.resolve(String(p).replace(/^~(?=$|[\\/])/, HOME));
 const slash = p => p.replace(/\\/g, '/');
 const readJson = (p, d) => {
@@ -38,8 +38,8 @@ const readJson = (p, d) => {
 const writeJson = (p, o) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, JSON.stringify(o, null, 2) + '\n'); };
 const tilde = p => (p.startsWith(HOME) ? '~' + p.slice(HOME.length).replace(/\\/g, '/') : p);
 
-const isOurs = h => typeof (h && h.command) === 'string' && /swap\.js"? hook\b/.test(h.command) && /claude-swap/i.test(h.command);
-const isOurStatus = s => s && typeof s.command === 'string' && /claude-swap/i.test(s.command) && /statusline\.js/.test(s.command);
+const isOurs = h => typeof (h && h.command) === 'string' && /swap\.js"? hook\b/.test(h.command) && /swaphat|claude-swap/i.test(h.command);
+const isOurStatus = s => s && typeof s.command === 'string' && /swaphat|claude-swap/i.test(s.command) && /statusline\.js/.test(s.command);
 
 function stripHooks(settings) {
   const hooks = settings.hooks || {};
@@ -67,7 +67,7 @@ function patchSettings(dir, app, wantStatus) {
   else statusNote = ' (kept your own status line; add --statusline to replace it)';
 
   if (JSON.stringify(s) !== before) {
-    if (fs.existsSync(file) && !fs.existsSync(file + '.claude-swap-backup')) fs.copyFileSync(file, file + '.claude-swap-backup');
+    if (fs.existsSync(file) && !fs.existsSync(file + '.swaphat-backup')) fs.copyFileSync(file, file + '.swaphat-backup');
     writeJson(file, s);
   }
   return statusNote;
@@ -75,8 +75,8 @@ function patchSettings(dir, app, wantStatus) {
 
 function writeCommand(dir, app) {
   const file = path.join(dir, 'commands', 'swap.md');
-  if (fs.existsSync(file) && !fs.readFileSync(file, 'utf8').includes(MARK)) {
-    fs.copyFileSync(file, file + '.claude-swap-backup');
+  if (fs.existsSync(file) && !/<!-- (swaphat|claude-swap) -->/.test(fs.readFileSync(file, 'utf8'))) {
+    fs.copyFileSync(file, file + '.swaphat-backup');
   }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `---
@@ -85,7 +85,7 @@ argument-hint: "[status | auto [on|off]]"
 disable-model-invocation: true
 ---
 ${MARK}
-A claude-swap hook normally handles /swap before you see this. If you are reading it, the hook did not run.
+A swaphat hook normally handles /swap before you see this. If you are reading it, the hook did not run.
 Run this one command, then reply with exactly the line it prints and nothing else:
 
 node "${slash(path.join(app, 'swap.js'))}" $ARGUMENTS
@@ -98,10 +98,10 @@ function writeLauncher(app) {
   if (!fs.existsSync(bin) || !onPath) return null;
   const js = path.join(app, 'swap.js');
   if (process.platform === 'win32') {
-    fs.writeFileSync(path.join(bin, 'claude-swap.cmd'), `@REM claude-swap\r\n@node "${js}" %*\r\n`);
+    fs.writeFileSync(path.join(bin, 'swaphat.cmd'), `@node "${js}" %*\r\n`);
   } else {
-    const f = path.join(bin, 'claude-swap');
-    fs.writeFileSync(f, `#!/bin/sh\n# claude-swap\nexec node "${js}" "$@"\n`);
+    const f = path.join(bin, 'swaphat');
+    fs.writeFileSync(f, `#!/bin/sh\nexec node "${js}" "$@"\n`);
     fs.chmodSync(f, 0o755);
   }
   return bin;
@@ -109,9 +109,9 @@ function writeLauncher(app) {
 
 function removeLauncher() {
   const bin = path.join(HOME, '.local', 'bin');
-  for (const n of ['claude-swap', 'claude-swap.cmd']) {
+  for (const n of ['swaphat', 'swaphat.cmd', 'claude-swap', 'claude-swap.cmd']) {
     const f = path.join(bin, n);
-    try { if (fs.readFileSync(f, 'utf8').includes('claude-swap')) fs.unlinkSync(f); } catch {}
+    try { if (fs.readFileSync(f, 'utf8').includes('swap.js')) fs.unlinkSync(f); } catch {}
   }
 }
 
@@ -147,14 +147,14 @@ function install(o) {
   }
   const bin = writeLauncher(app);
 
-  const hasLogin = d => { try { return !!JSON.parse(fs.readFileSync(path.join(d, '.credentials.json'), 'utf8')).claudeAiOauth; } catch { return false; } };
-  const run = bin ? 'claude-swap' : `node "${path.join(app, 'swap.js')}"`;
-  console.log(`claude-swap installed in ${app}${note}`);
-  console.log(`  ${cfg.accounts[0].name}: ${cfg.accounts[0].dir} ${hasLogin(dirs[0]) ? '(signed in)' : '(not signed in yet: run claude and /login)'}`);
-  console.log(`  ${cfg.accounts[1].name}: ${cfg.accounts[1].dir} ${hasLogin(dirs[1]) ? '(signed in)' : `(not signed in yet: run ${run} login)`}`);
-  if (process.platform === 'darwin' && !hasLogin(dirs[0]))
-    console.log('\nNote: on macOS Claude Code usually keeps logins in the Keychain, which claude-swap cannot swap yet.');
-  console.log(`\nThen type /swap in Claude Code. From a terminal: ${run} [status | auto on]`);
+  const run = bin ? 'swaphat' : `node "${path.join(app, 'swap.js')}"`;
+  const doctor = require('child_process').spawnSync(process.execPath, [path.join(app, 'swap.js'), 'doctor'], {
+    encoding: 'utf8', env: { ...process.env, SWAPHAT_HOME: app, CLAUDE_CONFIG_DIR: '' },
+  });
+  console.log(`swaphat installed in ${app}${note}\n`);
+  console.log((doctor.stdout || '').trimEnd());
+  console.log(`\nNext: ${run} login (once, for the second account), then type /swap in Claude Code.`);
+  console.log(`From a terminal: ${run} [status | auto on | doctor]`);
   console.log('Restart any Claude Code sessions that are already open so they load the hook.');
 }
 
@@ -163,7 +163,7 @@ function uninstall() {
   const cfg = readJson(path.join(app, 'config.json'), null);
   const st = readJson(path.join(app, 'state.json'), {});
   if (cfg && st.swapped && fs.existsSync(path.join(app, 'swap.js'))) {
-    process.env.CLAUDE_SWAP_HOME = app;
+    process.env.SWAPHAT_HOME = app;
     const r = require(path.join(app, 'swap.js')).swap();
     console.log(r.err ? `couldnt swap back: ${r.err}` : 'swapped the accounts back to their own dirs');
   }
@@ -177,22 +177,23 @@ function uninstall() {
       writeJson(file, s);
     }
     const cmd = path.join(d, 'commands', 'swap.md');
-    try { if (fs.readFileSync(cmd, 'utf8').includes(MARK)) fs.unlinkSync(cmd); } catch {}
-    if (fs.existsSync(cmd + '.claude-swap-backup') && !fs.existsSync(cmd)) fs.renameSync(cmd + '.claude-swap-backup', cmd);
+    try { if (/<!-- (swaphat|claude-swap) -->/.test(fs.readFileSync(cmd, 'utf8'))) fs.unlinkSync(cmd); } catch {}
+    if (fs.existsSync(cmd + '.swaphat-backup') && !fs.existsSync(cmd)) fs.renameSync(cmd + '.swaphat-backup', cmd);
   }
   removeLauncher();
   fs.rmSync(app, { recursive: true, force: true });
-  console.log('claude-swap removed.');
+  console.log('swaphat removed.');
   if (cfg) console.log(`Your second login is still in ${cfg.accounts[1].dir}; delete that folder if you dont want it.`);
 }
 
 function main(argv) {
   const o = parseArgs(argv);
+  if (Number(process.versions.node.split('.')[0]) < 18) throw new Error(`needs node 18 or newer, this is ${process.versions.node}`);
   if (o.help) return console.log('node install.js [--names "A,B"] [--second-dir DIR] [--statusline|--no-statusline] | --uninstall');
   return o.uninstall ? uninstall() : install(o);
 }
 
 if (require.main === module) {
-  try { main(process.argv.slice(2)); } catch (e) { console.error(`claude-swap: ${e.message}`); process.exitCode = 1; }
+  try { main(process.argv.slice(2)); } catch (e) { console.error(`swaphat: ${e.message}`); process.exitCode = 1; }
 }
 module.exports = { main, parseArgs };
