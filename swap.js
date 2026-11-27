@@ -106,7 +106,10 @@ function withLock(fn) {
 
 function sameAccount(creds, dirs) {
   if (creds[0].claudeAiOauth.refreshToken === creds[1].claudeAiOauth.refreshToken) return true;
-  const ids = dirs.map(d => ((readJson(globalCfgFile(d), {}) || {}).oauthAccount || {}).accountUuid);
+  const ids = dirs.map(d => {
+    const a = (readJson(globalCfgFile(d), {}) || {}).oauthAccount || {};
+    return a.accountUuid && a.organizationUuid ? `${a.accountUuid}/${a.organizationUuid}` : null;
+  });
   return !!(ids[0] && ids[0] === ids[1]);
 }
 

@@ -116,10 +116,13 @@ test('refuses to swap when both dirs hold the same account', () => {
     s.login(s.a, 'A'); s.login(s.b, 'A');
     assert.match(s.swap([]).out, /same account/);
     s.login(s.b, 'B');
-    fs.writeFileSync(path.join(s.home, '.claude.json'), JSON.stringify({ oauthAccount: { accountUuid: 'u1' } }));
-    fs.writeFileSync(path.join(s.b, '.claude.json'), JSON.stringify({ oauthAccount: { accountUuid: 'u1' } }));
+    fs.writeFileSync(path.join(s.home, '.claude.json'), JSON.stringify({ oauthAccount: { accountUuid: 'u1', organizationUuid: 'o1' } }));
+    fs.writeFileSync(path.join(s.b, '.claude.json'), JSON.stringify({ oauthAccount: { accountUuid: 'u1', organizationUuid: 'o1' } }));
     assert.match(s.swap([]).out, /same account/);
     assert.equal(s.token(s.a), 'rt-A');
+    fs.writeFileSync(path.join(s.b, '.claude.json'), JSON.stringify({ oauthAccount: { accountUuid: 'u1', organizationUuid: 'o2' } }));
+    assert.match(s.swap([]).out, /^swapped to/, 'same person in two orgs is two accounts');
+    assert.equal(s.token(s.a), 'rt-B');
   } finally { s.done(); }
 });
 
