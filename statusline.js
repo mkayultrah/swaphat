@@ -1,55 +1,117 @@
 #!/usr/bin/env node
 'use strict';
+
 const path = require('path');
 
-const esc = (code, t) => `\x1b[${code}m${t}\x1b[0m`;
-const pctColour = p => (p >= 90 ? '31' : p >= 70 ? '33' : '32');
+const esc = (code, text) => `\x1b[${code}m${text}\x1b[0m`;
 
-function left(r, now) {
-  if (r == null) return '';
-  const t = typeof r === 'number' ? (r < 1e12 ? r * 1000 : r) : Date.parse(r);
-  if (!t || isNaN(t)) return '';
-  const mins = Math.round((t - now) / 60000);
-  if (mins <= 0) return '';
+const pctColour = pct => {
+  if (!Number.isFinite(pct)) return '37';
+  if (pct >= 90) return '31';
+  if (pct >= 70) return '33';
+  return '32';
+};
+
+function left(resetAt, now) {
+  if (resetAt == null) return '';
+  const ts = typeof resetAt === 'number'
+    ? (resetAt < 1e12 ? resetAt * 1000 : resetAt)
+    : Date.parse(resetAt);
+  if (!Number.isFinite(ts) || ts <= now) return '';
+
+  const diffMs = ts - now;
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 1) return ' <1m';
   if (mins < 60) return ` ${mins}m`;
-  const h = Math.floor(mins / 60);
-  return h < 24 ? ` ${h}h${String(mins % 60).padStart(2, '0')}` : ` ${Math.floor(h / 24)}d${h % 24}h`;
+
+  const hours = Math.floor(mins / 60);
+  const remMins = mins % 60;
+  if (hours < 24) {
+    return ` ${hours}h${String(remMins).padStart(2, '0')}`;
+  }
+  const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  return ` ${days}d${remHours}h`;
 }
 
-function render(j, now = Date.now()) {
-  let info = null;
-  try { info = require(path.join(__dirname, 'swap.js')).onStatus(j, now); } catch {}
-  const cur = info && info.cur;
-  const s = (info && info.s) || {};
-  const name = cur ? cur.name : '?';
-  const parts = [esc(`1;${(cur && cur.colour) || '37'}`, name) + (s.auto ? esc('2', ' auto') : '')];
-  if (info && info.swapped) parts[0] = esc('2', `${info.swapped.from} -> `) + parts[0];
+function parsePct(win) {
+  if (!win || typeof win !== 'object') return null;
+  let raw = win.used_percentage ?? win.utilization ?? win.used_percent;
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
+  if (raw <= 1 && typeof win.utilization === 'number') raw *= 100;
+  return Math.max(0, Math.min(100, Math.round(raw)));
+}
 
-  const rl = (info && info.swapped) ? {} : (j.rate_limits || {});
-  for (const [key, short] of [['five_hour', '5h'], ['seven_day', '7d']]) {
-    const w = rl[key];
-    if (!w) continue;
-    let p = w.used_percentage ?? w.utilization ?? w.used_percent;
-    if (p == null) continue;
-    if (p <= 1 && w.utilization != null) p *= 100;
-    p = Math.round(p);
-    parts.push(`${short} ${esc(pctColour(p), p + '%')}${esc('2', left(w.resets_at, now))}`);
+function formatWindow(shortLabel, win, now) {
+  const pct = parsePct(win);
+  if (pct === null) return null;
+  const remaining = esc('2', left(win.resets_at, now));
+  return `${shortLabel} ${esc(pctColour(pct), `${pct}%`)}${remaining}`;
+}
+
+function render(payload, now = Date.now()) {
+  const j = payload && typeof payload === 'object' ? payload : {};
+
+  let info = null;
+  try {
+    const swapMod = require(path.join(__dirname, 'swap.js'));
+    if (typeof swapMod.onStatus === 'function') {
+      info = swapMod.onStatus(j, now);
+    }
+  } catch {}
+
+  const cur = info && info.cur ? info.cur : null;
+  const s = info && info.s && typeof info.s === 'object' ? info.s : {};
+  const name = cur && cur.name ? cur.name : '?';
+  const colour = cur && cur.colour ? cur.colour : '37';
+
+  let badge = esc(`1;${colour}`, name) + (s.auto ? esc('2', ' auto') : '');
+  if (info && info.swapped && info.swapped.from) {
+    badge = esc('2', `${info.swapped.from} -> `) + badge;
   }
-  if (info && info.swapped) parts.push(esc('2', 'swapped before the limit'));
-  else if (!rl.five_hour && !rl.seven_day) parts.push(esc('2', 'usage after first reply'));
-  const cw = j.context_window || {};
-  if (cw.used_percentage != null) parts.push(esc('2', `ctx ${Math.round(cw.used_percentage)}%`));
+
+  const parts = [badge];
+  const rl = j.rate_limits && typeof j.rate_limits === 'object' ? j.rate_limits : {};
+
+  if (info && info.swapped) {
+    parts.push(esc('2', 'swapped before the limit'));
+  } else {
+    let addedAny = false;
+    for (const [key, shortLabel] of [['five_hour', '5h'], ['seven_day', '7d']]) {
+      const formatted = formatWindow(shortLabel, rl[key], now);
+      if (formatted) {
+        parts.push(formatted);
+        addedAny = true;
+      }
+    }
+    if (!addedAny) {
+      parts.push(esc('2', 'usage after first reply'));
+    }
+  }
+
+  const cw = j.context_window && typeof j.context_window === 'object' ? j.context_window : null;
+  if (cw && typeof cw.used_percentage === 'number' && Number.isFinite(cw.used_percentage)) {
+    const ctxPct = Math.max(0, Math.min(100, Math.round(cw.used_percentage)));
+    parts.push(esc('2', `ctx ${ctxPct}%`));
+  }
+
   return parts.join(esc('2', ' | '));
 }
 
 if (require.main === module) {
   let raw = '';
-  process.stdin.on('data', d => (raw += d));
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', chunk => {
+    raw += chunk;
+  });
   process.stdin.on('end', () => {
-    let j = {};
-    try { j = JSON.parse(raw.replace(/^\uFEFF/, '')); } catch {}
-    process.stdout.write(render(j));
+    let parsed = {};
+    try {
+      const cleaned = raw.replace(/^\uFEFF/, '').trim();
+      if (cleaned) parsed = JSON.parse(cleaned);
+    } catch {}
+    process.stdout.write(render(parsed));
   });
 }
 
-module.exports = { render };
+module.exports = { render, left, pctColour };
