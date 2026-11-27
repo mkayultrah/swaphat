@@ -9,10 +9,10 @@ const cp = require('child_process');
 const ROOT = path.join(__dirname, '..');
 
 function sandbox() {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-swap-test-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'swaphat-test-'));
   const env = { ...process.env, HOME: home, USERPROFILE: home, PATH: process.env.PATH };
-  delete env.CLAUDE_CONFIG_DIR; delete env.CLAUDE_SWAP_HOME; delete env.CLAUDE_CODE_ENTRYPOINT;
-  const app = path.join(home, '.claude-swap');
+  delete env.CLAUDE_CONFIG_DIR; delete env.SWAPHAT_HOME; delete env.CLAUDE_CODE_ENTRYPOINT;
+  const app = path.join(home, '.swaphat');
   const a = path.join(home, '.claude'), b = path.join(home, '.claude-second');
   const run = (file, args = [], opts = {}) => {
     const r = cp.spawnSync(process.execPath, [file, ...args], { env: { ...env, ...(opts.env || {}) }, input: opts.input, encoding: 'utf8' });
@@ -42,7 +42,7 @@ test('install writes config, hooks, command and status line into both dirs', () 
       assert.match(st.hooks.UserPromptExpansion[0].hooks[0].command, /swap\.js" hook$/);
       assert.equal(st.hooks.StopFailure[0].matcher, 'rate_limit');
       assert.match(st.statusLine.command, /statusline\.js/);
-      assert.ok(fs.readFileSync(path.join(d, 'commands', 'swap.md'), 'utf8').includes('claude-swap'));
+      assert.ok(fs.readFileSync(path.join(d, 'commands', 'swap.md'), 'utf8').includes('swaphat'));
     }
   } finally { s.done(); }
 });
@@ -59,7 +59,7 @@ test('install keeps existing settings and is idempotent', () => {
     assert.equal(st.statusLine.command, 'my-status', 'does not replace a status line it does not own');
     assert.equal(st.hooks.StopFailure.length, 2, 'own hook added once, user hook kept');
     assert.equal(st.hooks.UserPromptExpansion.length, 1);
-    assert.ok(fs.existsSync(path.join(s.a, 'settings.json.claude-swap-backup')));
+    assert.ok(fs.existsSync(path.join(s.a, 'settings.json.swaphat-backup')));
   } finally { s.done(); }
 });
 
@@ -103,10 +103,110 @@ test('swap without a second login fails cleanly and changes nothing', () => {
     s.install();
     s.login(s.a, 'A');
     const r = s.swap([]);
-    assert.match(r.out, process.platform === 'darwin' ? /^cant swap: on macOS/ : /^cant swap: no claude\.ai login/);
+    assert.match(r.out, /^cant swap: no claude\.ai login/);
     assert.equal(s.token(s.a), 'rt-A');
     assert.equal(s.json(path.join(s.app, 'state.json')).swapped, false);
   } finally { s.done(); }
+});
+
+test('refuses to swap when both dirs hold the same account', () => {
+  const s = sandbox();
+  try {
+    s.install();
+    s.login(s.a, 'A'); s.login(s.b, 'A');
+    assert.match(s.swap([]).out, /same account/);
+    s.login(s.b, 'B');
+    fs.writeFileSync(path.join(s.home, '.claude.json'), JSON.stringify({ oauthAccount: { accountUuid: 'u1' } }));
+    fs.writeFileSync(path.join(s.b, '.claude.json'), JSON.stringify({ oauthAccount: { accountUuid: 'u1' } }));
+    assert.match(s.swap([]).out, /same account/);
+    assert.equal(s.token(s.a), 'rt-A');
+  } finally { s.done(); }
+});
+
+test('a fresh lock blocks a second swap, a stale one is cleared', () => {
+  const s = sandbox();
+  try {
+    s.install();
+    s.login(s.a, 'A'); s.login(s.b, 'B');
+    const lock = path.join(s.app, 'swap.lock');
+    fs.writeFileSync(lock, '');
+    assert.match(s.swap([]).out, /another swap is running/);
+    assert.equal(s.token(s.a), 'rt-A');
+    const old = new Date(Date.now() - 60 * 1000);
+    fs.utimesSync(lock, old, old);
+    assert.match(s.swap([]).out, /^swapped to/);
+    assert.equal(s.token(s.a), 'rt-B');
+    assert.ok(!fs.existsSync(lock));
+  } finally { s.done(); }
+});
+
+test('a failed second write is rolled back', () => {
+  const s = sandbox();
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE, SWAPHAT_HOME: process.env.SWAPHAT_HOME, CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR };
+  const rename = fs.renameSync;
+  try {
+    s.install();
+    s.login(s.a, 'A'); s.login(s.b, 'B');
+    Object.assign(process.env, { HOME: s.home, USERPROFILE: s.home, SWAPHAT_HOME: s.app });
+    delete process.env.CLAUDE_CONFIG_DIR;
+    const file = path.join(s.app, 'swap.js');
+    delete require.cache[require.resolve(file)];
+    const mod = require(file);
+    const target = path.join(s.b, '.credentials.json');
+    fs.renameSync = (from, to) => { if (path.resolve(to) === path.resolve(target)) throw new Error('disk full'); return rename(from, to); };
+    const r = mod.swap();
+    fs.renameSync = rename;
+    assert.match(r.err, /disk full\. Nothing was changed/);
+    assert.equal(s.token(s.a), 'rt-A');
+    assert.equal(s.token(s.b), 'rt-B');
+    assert.equal(s.json(path.join(s.app, 'state.json')).swapped, false);
+  } finally {
+    fs.renameSync = rename;
+    for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    s.done();
+  }
+});
+
+test('doctor reports what is missing', () => {
+  const s = sandbox();
+  try {
+    s.install('--names', 'Personal,Work');
+    s.login(s.a, 'A');
+    let out = s.swap(['doctor']).out;
+    assert.match(out, /^ok {3}node /m);
+    assert.match(out, /^FIX .*\.claude-second holds Work: not signed in, run swaphat login/m);
+    assert.match(out, /^ok {3}.*settings\.json has the \/swap hook/m);
+    s.login(s.b, 'B');
+    out = s.swap(['doctor']).out;
+    assert.doesNotMatch(out, /^FIX/m);
+    assert.match(out, /the two dirs hold different accounts/);
+  } finally { s.done(); }
+});
+
+test('macOS keychain logins are swapped', { skip: process.platform !== 'darwin' }, () => {
+  const s = sandbox();
+  const kc = path.join(s.home, 'swap-test.keychain-db');
+  const sec = (...args) => cp.spawnSync('security', args, { encoding: 'utf8' });
+  try {
+    assert.equal(sec('create-keychain', '-p', 'test', kc).status, 0);
+    sec('unlock-keychain', '-p', 'test', kc);
+    s.install();
+    const hash = p => require('crypto').createHash('sha256').update(path.resolve(p).normalize('NFC')).digest('hex').slice(0, 8);
+    const services = { [s.a]: 'Claude Code-credentials', [s.b]: `Claude Code-credentials-${hash(s.b)}` };
+    for (const [dir, tok] of [[s.a, 'A'], [s.b, 'B']])
+      assert.equal(sec('add-generic-password', '-a', 'claude-code-user', '-s', services[dir], '-w', JSON.stringify({ claudeAiOauth: { refreshToken: `rt-${tok}` } }), kc).status, 0);
+    const read = dir => {
+      const t = sec('find-generic-password', '-s', services[dir], '-w', kc).stdout.trim();
+      return JSON.parse(/^[0-9a-f]+$/i.test(t) ? Buffer.from(t, 'hex').toString('utf8') : t).claudeAiOauth.refreshToken;
+    };
+    const env = { SWAPHAT_KEYCHAIN: kc };
+    assert.match(s.swap(['doctor'], { env }).out, /signed in, keychain/);
+    assert.equal(s.swap([], { env }).out, 'swapped to Second');
+    assert.equal(read(s.a), 'rt-B');
+    assert.equal(read(s.b), 'rt-A');
+    assert.equal(s.swap([], { env }).out, 'swapped to Main');
+    assert.equal(read(s.a), 'rt-A');
+  } finally { sec('delete-keychain', kc); s.done(); }
 });
 
 test('hook: /swap stops the prompt with one line, other commands pass through', () => {
