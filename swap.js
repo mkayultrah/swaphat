@@ -190,6 +190,10 @@ function state() {
     usage: (s.usage && typeof s.usage === 'object') ? s.usage : {},
     auto: Boolean(s.auto),
     lastAuto: Number(s.lastAuto) || 0,
+    lastManual: Number(s.lastManual) || 0,
+    lastSwap: s.lastSwap && typeof s.lastSwap === 'object' ? s.lastSwap : null,
+    lastRl: typeof s.lastRl === 'string' ? s.lastRl : null,
+    rlAtSwap: typeof s.rlAtSwap === 'string' ? s.rlAtSwap : null,
   };
 }
 
@@ -368,12 +372,26 @@ function pickNext(c, s, cur, auto, now = Date.now()) {
     ok.sort((a, b) => load(s, a.name, now) - load(s, b.name, now));
     return ok[0] || null;
   }
+  const open = ready.filter(a => load(s, a.name, now) < 100);
   const i = cur ? c.accounts.findIndex(a => a.name === cur.name) : -1;
   for (let k = 1; k <= c.accounts.length; k++) {
     const a = c.accounts[(i + k) % c.accounts.length];
-    if (ready.includes(a)) return a;
+    if (open.includes(a)) return a;
   }
   return null;
+}
+
+function resetsAt(s, name, now) {
+  const u = s.usage[name] || {};
+  const times = ['five_hour', 'seven_day']
+    .map(k => u[k])
+    .filter(w => w && w.pct >= 100 && w.resets && w.resets > now)
+    .map(w => w.resets);
+  return times.length ? Math.max(...times) : null;
+}
+
+function clock(t) {
+  return new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
 function sameIdentity(credA, acctA, credB, acctB) {
@@ -394,7 +412,7 @@ function doSwap(targetName, fromDir, opts = {}) {
   if (!slot) {
     return { err: `cant swap: ${tilde(fromDir)} isnt one of the dirs swaphat manages (${c.slots.map(tilde).join(', ')})` };
   }
-  if (opts.auto && now - (s.lastAuto || 0) < GUARD_MS) {
+  if (opts.auto && now - Math.max(s.lastAuto || 0, s.lastManual || 0) < GUARD_MS) {
     return { err: 'auto swap skipped: swapped less than 5 min ago', quiet: true };
   }
 
@@ -407,6 +425,11 @@ function doSwap(targetName, fromDir, opts = {}) {
   if (!target) {
     if (targetName) return { err: `cant swap: no account called "${targetName}". Try /swap list` };
     if (opts.auto) return { err: 'auto swap skipped: every other account is over the limit too', quiet: true };
+    const full = c.accounts.filter(a => s.where[a.name] && a.name !== cur.name && load(s, a.name, now) >= 100);
+    if (full.length) {
+      const until = full.map(a => { const t = resetsAt(s, a.name, now); return t ? `${a.name} until ${clock(t)}` : a.name; }).join(', ');
+      return { err: `staying on ${cur.name}: ${until} is out of usage. /swap ${full[0].name.toLowerCase()} switches anyway` };
+    }
     const waiting = c.accounts.find(a => !s.where[a.name]);
     if (waiting) return { err: `cant swap: ${waiting.name} isnt logged in yet. Run "swaphat add ${waiting.name}"` };
     return { err: 'cant swap: there is no other account yet. Add one with "swaphat add <name>"' };
@@ -456,6 +479,9 @@ function doSwap(targetName, fromDir, opts = {}) {
     s.where[cur.name] = VAULT;
     s.where[target.name] = slot;
     if (opts.auto) s.lastAuto = now;
+    else s.lastManual = now;
+    s.lastSwap = { from: cur.name, to: target.name, at: now };
+    s.rlAtSwap = s.lastRl;
     try {
       saveState(s);
     } catch (e) {
@@ -507,6 +533,9 @@ function doSwap(targetName, fromDir, opts = {}) {
     s.where[cur.name] = tw;
     s.where[target.name] = slot;
     if (opts.auto) s.lastAuto = now;
+    else s.lastManual = now;
+    s.lastSwap = { from: cur.name, to: target.name, at: now };
+    s.rlAtSwap = s.lastRl;
     try {
       saveState(s);
     } catch (e) {
@@ -776,7 +805,13 @@ function onStatus(j, now = Date.now()) {
     const s = state();
     const cur = accountAt(c, s, slot);
     if (!cur) return { c, s, cur };
-    if (noteUsage(s, cur.name, j && j.rate_limits, now)) saveState(s);
+    const rl = j && j.rate_limits && typeof j.rate_limits === 'object' ? j.rate_limits : null;
+    const key = rl ? JSON.stringify(rl) : null;
+    let dirty = false;
+    if (key && key !== s.lastRl) { s.lastRl = key; dirty = true; }
+    if (s.rlAtSwap && key && key !== s.rlAtSwap) { s.rlAtSwap = null; dirty = true; }
+    if (!(s.rlAtSwap && key === s.rlAtSwap) && noteUsage(s, cur.name, rl, now)) dirty = true;
+    if (dirty) saveState(s);
     if (s.auto && load(s, cur.name, now) >= getThreshold(c)) {
       const sw = doSwap(null, dir, { auto: true });
       if (sw.now && !sw.same) {
@@ -878,7 +913,7 @@ function command(argv) {
     : a.join(' ');
   const r = swap(target);
   if (r.err) return r.err;
-  return r.same ? `already on ${r.now}` : `swapped to ${r.now}`;
+  return r.same ? `already on ${r.now}` : `✓ swapped to ${r.now}`;
 }
 
 function continueLater(text) {

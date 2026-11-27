@@ -63,7 +63,7 @@ The installer copies itself to `~/.swaphat`, then adds two hooks, a `/swap` comm
 In Claude Code:
 
 ```
-/swap              next account
+/swap              next account that still has usage left
 /swap work         that account (a prefix works too)
 /swap list         all accounts, where they are, last usage
 /swap status       which account this session is on
@@ -75,7 +75,11 @@ In Claude Code:
 
 From a terminal: the same, plus `swaphat add <name>` and `swaphat remove <name>`.
 
-Auto swap won't fire twice within 5 minutes. If every other account is over the line too, it stays where it is.
+A bare `/swap` skips accounts that are out of usage and tells you when they reset. Naming one, like `/swap work`, always switches.
+
+Auto swap won't fire twice within 5 minutes, and it won't undo a swap you just made by hand. If every other account is over the line too, it stays where it is.
+
+After a swap the status line shows a green `✓ swapped to Work` for a minute.
 
 ```
 $ swaphat list
@@ -96,7 +100,7 @@ auto swap on at 95%
 ## Things to know
 
 - Every session on `~/.claude` swaps together, since they share one login.
-- Claude Code adds the "Operation stopped by hook:" bit itself.
+- Claude Code puts "Operation stopped by hook:" in front of the `/swap` reply itself, in its warning colour. A hook has no way to change that, so the green confirmation lives in the status line.
 - The usage numbers come from the status line, so an account's numbers are only as fresh as the last time you used it.
 - From Git Bash, `claude -p "/swap"` needs `MSYS_NO_PATHCONV=1`, otherwise Git Bash turns `/swap` into a file path.
 - Every swap goes in `~/.swaphat/swap.log`.

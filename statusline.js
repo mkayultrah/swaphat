@@ -73,9 +73,13 @@ function render(payload, now = Date.now()) {
   const parts = [badge];
   const rl = j.rate_limits && typeof j.rate_limits === 'object' ? j.rate_limits : {};
 
+  const recent = s.lastSwap && cur && s.lastSwap.to === cur.name && now - (Number(s.lastSwap.at) || 0) < 60 * 1000;
   if (info && info.swapped) {
-    parts.push(esc('2', 'swapped before the limit'));
+    parts.push(esc('32', `✓ swapped to ${name} before the limit`));
+  } else if (recent && s.rlAtSwap) {
+    parts.push(esc('32', `✓ swapped to ${name}`));
   } else {
+    if (recent) parts.push(esc('32', `✓ swapped to ${name}`));
     let addedAny = false;
     for (const [key, shortLabel] of [['five_hour', '5h'], ['seven_day', '7d']]) {
       const formatted = formatWindow(shortLabel, rl[key], now);

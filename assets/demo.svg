@@ -10,12 +10,12 @@
     <text x="28" y="84"><tspan fill="#8b919c">&gt;</tspan> /swap status</text>
     <text x="48" y="112" fill="#8b919c">Operation stopped by hook: on <tspan fill="#3fb6a8" font-weight="bold">Personal</tspan>, auto swap off</text>
     <text x="28" y="156"><tspan fill="#8b919c">&gt;</tspan> /swap</text>
-    <text x="48" y="184" fill="#8b919c">Operation stopped by hook: swapped to <tspan fill="#f2a541" font-weight="bold">Work</tspan></text>
+    <text x="48" y="184" fill="#8b919c">Operation stopped by hook: <tspan fill="#5fcf80">✓</tspan> swapped to <tspan fill="#f2a541" font-weight="bold">Work</tspan></text>
     <text x="28" y="228"><tspan fill="#8b919c">&gt;</tspan> ok, keep going with the tokenizer tests</text>
     <text x="28" y="268"><tspan fill="#f2a541">●</tspan> Picking up where we left off. Next up is the escape handling in</text>
     <text x="48" y="294">lexString, then I'll rerun the suite.</text>
   </g>
   <rect x="0" y="340" width="880" height="60" fill="#15171c"/>
   <line x1="20" y1="342" x2="860" y2="342" stroke="#2a2e36" stroke-width="1"/>
-  <text x="28" y="374" font-size="15" fill="#6b717c"><tspan fill="#f2a541" font-weight="bold">Work</tspan> | 5h <tspan fill="#5fcf80">12%</tspan> 4h31 | 7d <tspan fill="#5fcf80">33%</tspan> 2d6h | ctx 41%</text>
+  <text x="28" y="374" font-size="15" fill="#6b717c"><tspan fill="#f2a541" font-weight="bold">Work</tspan> | <tspan fill="#5fcf80">✓ swapped to Work</tspan> | 5h <tspan fill="#5fcf80">12%</tspan> 4h31 | 7d <tspan fill="#5fcf80">33%</tspan> 2d6h | ctx 41%</text>
 </svg>

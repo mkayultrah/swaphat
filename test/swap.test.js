@@ -177,7 +177,7 @@ test('swap with a saved account moves the login and the account info', () => {
     s.install('--names', 'Personal');
     s.login(s.a, 'A', who('a'));
     s.extra('Work', 'W', who('w'));
-    assert.equal(s.swap().out, 'swapped to Work');
+    assert.equal(s.swap().out, '✓ swapped to Work');
     assert.equal(s.token(s.a), 'rt-W');
     const g = s.json(path.join(s.home, '.claude.json'));
     assert.equal(g.oauthAccount.emailAddress, 'w@example.com');
@@ -186,7 +186,7 @@ test('swap with a saved account moves the login and the account info', () => {
     assert.equal(s.json(s.vaultFile('Personal')).claudeAiOauth.refreshToken, 'rt-A');
     assert.ok(!fs.existsSync(s.vaultFile('Work')), 'nothing is left behind in the vault');
     assert.equal(s.swap(['status']).out, 'on Work, auto swap off');
-    assert.equal(s.swap().out, 'swapped to Personal');
+    assert.equal(s.swap().out, '✓ swapped to Personal');
     assert.equal(s.token(s.a), 'rt-A');
     assert.equal(s.json(path.join(s.home, '.claude.json')).oauthAccount.emailAddress, 'a@example.com');
   } finally { s.done(); }
@@ -199,16 +199,16 @@ test('three accounts: rotate in order, jump by name or prefix', () => {
     s.login(s.a, 'A', who('a'));
     s.extra('Work', 'W', who('w'));
     s.extra('Spare', 'S', who('s'));
-    assert.equal(s.swap().out, 'swapped to Work');
-    assert.equal(s.swap().out, 'swapped to Spare');
-    assert.equal(s.swap().out, 'swapped to Personal');
-    assert.equal(s.swap(['spare']).out, 'swapped to Spare');
+    assert.equal(s.swap().out, '✓ swapped to Work');
+    assert.equal(s.swap().out, '✓ swapped to Spare');
+    assert.equal(s.swap().out, '✓ swapped to Personal');
+    assert.equal(s.swap(['spare']).out, '✓ swapped to Spare');
     assert.equal(s.token(s.a), 'rt-S');
-    assert.equal(s.swap(['next', 'wo']).out, 'swapped to Work');
+    assert.equal(s.swap(['next', 'wo']).out, '✓ swapped to Work');
     assert.equal(s.swap(['Work']).out, 'already on Work');
     assert.match(s.swap(['nobody']).out, /no account called "nobody"/);
     const hookOut = JSON.parse(s.hook({ hook_event_name: 'UserPromptExpansion', command_name: 'swap', command_args: 'personal' }).out);
-    assert.equal(hookOut.stopReason, 'swapped to Personal');
+    assert.equal(hookOut.stopReason, '✓ swapped to Personal');
   } finally { s.done(); }
 });
 
@@ -218,13 +218,13 @@ test('two dirs swap with each other', () => {
     s.install('--names', 'Personal,Work', '--second-dir', s.b);
     s.login(s.a, 'A', who('a'));
     s.login(s.b, 'B', who('b'));
-    assert.equal(s.swap().out, 'swapped to Work');
+    assert.equal(s.swap().out, '✓ swapped to Work');
     assert.equal(s.token(s.a), 'rt-B');
     assert.equal(s.token(s.b), 'rt-A');
     assert.equal(s.json(path.join(s.home, '.claude.json')).oauthAccount.emailAddress, 'b@example.com');
     assert.equal(s.json(path.join(s.b, '.claude.json')).oauthAccount.emailAddress, 'a@example.com');
     assert.equal(s.swap(['status'], { env: { CLAUDE_CONFIG_DIR: s.b } }).out, 'on Personal, auto swap off');
-    assert.equal(s.swap([], { env: { CLAUDE_CONFIG_DIR: s.b } }).out, 'swapped to Work');
+    assert.equal(s.swap([], { env: { CLAUDE_CONFIG_DIR: s.b } }).out, '✓ swapped to Work');
     assert.equal(s.token(s.b), 'rt-B');
     assert.match(s.swap(['status'], { env: { CLAUDE_CONFIG_DIR: path.join(s.home, 'elsewhere') } }).out, /isnt managed/);
     assert.match(s.swap([], { env: { CLAUDE_CONFIG_DIR: path.join(s.home, 'elsewhere') } }).out, /isnt one of the dirs/);
@@ -240,7 +240,7 @@ test('refuses to swap between two copies of the same account', () => {
     s.login(s.a, 'A', who('a')); s.login(s.b, 'B', who('a'));
     assert.match(s.swap().out, /same account/);
     s.login(s.b, 'B', who('a', 'o2'));
-    assert.equal(s.swap().out, 'swapped to Work', 'same person in two orgs is two accounts');
+    assert.equal(s.swap().out, '✓ swapped to Work', 'same person in two orgs is two accounts');
   } finally { s.done(); }
 });
 
@@ -277,7 +277,7 @@ test('a fresh lock blocks a swap, a stale one is cleared', () => {
     assert.equal(s.token(s.a), 'rt-A');
     const old = new Date(Date.now() - MIN);
     fs.utimesSync(lock, old, old);
-    assert.equal(s.swap().out, 'swapped to Work');
+    assert.equal(s.swap().out, '✓ swapped to Work');
     assert.ok(!fs.existsSync(lock));
   } finally { s.done(); }
 });
@@ -438,11 +438,62 @@ test('status line records usage and swaps before the limit', () => {
     assert.equal(s.st().usage.Personal.five_hour.pct, 50);
     assert.equal(s.status(at(96)).split(' | ')[0], 'Personal', 'auto is off');
     s.swap(['auto', 'on']);
-    assert.equal(s.status(at(96)), 'Personal -> Work auto | swapped before the limit | ctx 10%');
+    assert.equal(s.status(at(96)), 'Personal -> Work auto | ✓ swapped to Work before the limit | ctx 10%');
     assert.equal(s.token(s.a), 'rt-W');
-    assert.match(s.status({ rate_limits: { five_hour: { utilization: 0.2 } } }), /^Work auto \| 5h 20%/);
+    assert.match(s.status({ rate_limits: { five_hour: { utilization: 0.2 } } }), /^Work auto \| ✓ swapped to Work \| 5h 20%/);
     assert.match(s.status({}), /usage after first reply/);
     assert.equal(s.status({}, { env: { CLAUDE_CONFIG_DIR: path.join(s.home, 'x') } }), '? auto | usage after first reply');
+  } finally { s.done(); }
+});
+
+test('a bare /swap skips an account that is out of usage, naming it forces it', () => {
+  const s = sandbox();
+  try {
+    s.install('--names', 'Personal');
+    s.login(s.a, 'A');
+    s.extra('Work', 'W');
+    const st = s.st();
+    st.usage = { Work: { five_hour: { pct: 100, resets: Date.now() + 90 * MIN }, seen: Date.now() } };
+    fs.writeFileSync(path.join(s.app, 'state.json'), JSON.stringify(st));
+    assert.match(s.swap().out, /^staying on Personal: Work until \d.* is out of usage\. \/swap work switches anyway$/);
+    assert.equal(s.token(s.a), 'rt-A');
+    s.extra('Spare', 'S');
+    assert.equal(s.swap().out, '✓ swapped to Spare', 'skips the full one and takes the next');
+    assert.equal(s.swap(['work']).out, '✓ swapped to Work', 'naming it always works');
+    assert.equal(s.token(s.a), 'rt-W');
+  } finally { s.done(); }
+});
+
+test('auto swap leaves a swap you made by hand alone for 5 minutes', () => {
+  const s = sandbox();
+  try {
+    s.install('--names', 'Personal');
+    s.login(s.a, 'A');
+    s.extra('Work', 'W');
+    s.swap(['auto', 'on']);
+    assert.equal(s.swap(['work']).out, '✓ swapped to Work');
+    s.hook({ hook_event_name: 'StopFailure', error: 'rate_limit' });
+    assert.equal(s.token(s.a), 'rt-W', 'no bounce back');
+    assert.match(fs.readFileSync(path.join(s.app, 'swap.log'), 'utf8'), /auto swap skipped: swapped less than 5 min ago/);
+  } finally { s.done(); }
+});
+
+test('usage from before a swap is not pinned on the new account', () => {
+  const s = sandbox();
+  try {
+    s.install('--names', 'Personal');
+    s.login(s.a, 'A');
+    s.extra('Work', 'W');
+    const old = { rate_limits: { five_hour: { used_percentage: 97 } } };
+    s.status(old);
+    assert.equal(s.st().usage.Personal.five_hour.pct, 97);
+    s.swap(['auto', 'on']);
+    s.swap(['work']);
+    assert.equal(s.status(old), 'Work auto | ✓ swapped to Work', 'green confirmation, old numbers ignored');
+    assert.equal(s.st().usage.Work, undefined);
+    assert.equal(s.token(s.a), 'rt-W', 'stale 97% did not trigger an auto swap back');
+    s.status({ rate_limits: { five_hour: { used_percentage: 3 } } });
+    assert.equal(s.st().usage.Work.five_hour.pct, 3, 'fresh numbers are recorded');
   } finally { s.done(); }
 });
 
@@ -473,7 +524,7 @@ test('hook: /swap stops the prompt with one line, everything else passes', () =>
     s.login(s.a, 'A');
     s.extra('Work', 'W');
     const ev = (name, args) => ({ hook_event_name: 'UserPromptExpansion', command_name: name, command_args: args });
-    assert.deepEqual(JSON.parse(s.hook(ev('swap', '')).out), { continue: false, stopReason: 'swapped to Work', suppressOutput: true });
+    assert.deepEqual(JSON.parse(s.hook(ev('swap', '')).out), { continue: false, stopReason: '✓ swapped to Work', suppressOutput: true });
     assert.equal(JSON.parse(s.hook(ev('swap', 'status')).out).stopReason, 'on Work, auto swap off');
     assert.match(JSON.parse(s.hook(ev('swap', 'list')).out).stopReason, /^\n {2}Main\s+saved\n\* Work/, 'tables start on their own line');
     assert.match(JSON.parse(s.hook(ev('swap', 'add x')).out).stopReason, /from a terminal/);
@@ -544,15 +595,15 @@ test('macOS keychain logins are swapped and saved', { skip: process.platform !==
     };
     put(svc.a, 'A'); put(svc.b, 'B'); put(svc.c, 'S');
     assert.match(s.swap(['doctor'], { env }).out, /signed in \(keychain\)/);
-    assert.equal(s.swap([], { env }).out, 'swapped to Work');
+    assert.equal(s.swap([], { env }).out, '✓ swapped to Work');
     assert.equal(read(svc.a), 'rt-B');
     assert.equal(read(svc.b), 'rt-A');
     const added = s.swap(['add', 'Spare', '--from', path.join(s.home, 'login-spare')], { env });
     assert.equal(added.code, 0, added.err);
     assert.notEqual(sec('find-generic-password', '-s', svc.c, kc).status, 0, 'the login was moved out of its old item');
-    assert.equal(s.swap(['spare'], { env }).out, 'swapped to Spare');
+    assert.equal(s.swap(['spare'], { env }).out, '✓ swapped to Spare');
     assert.equal(read(svc.a), 'rt-S');
-    assert.equal(s.swap(['work'], { env }).out, 'swapped to Work');
+    assert.equal(s.swap(['work'], { env }).out, '✓ swapped to Work');
     assert.equal(read(svc.a), 'rt-B');
   } finally { sec('delete-keychain', kc); s.done(); }
 });
