@@ -208,7 +208,7 @@ test('three accounts: rotate in order, jump by name or prefix', () => {
     assert.equal(s.swap(['Work']).out, 'already on Work');
     assert.match(s.swap(['nobody']).out, /no account called "nobody"/);
     const hookOut = JSON.parse(s.hook({ hook_event_name: 'UserPromptExpansion', command_name: 'swap', command_args: 'personal' }).out);
-    assert.equal(hookOut.stopReason, '✓ swapped to Personal');
+    assert.equal(hookOut.stopReason, '\n✓ Switched to Personal');
   } finally { s.done(); }
 });
 
@@ -524,15 +524,56 @@ test('hook: /swap stops the prompt with one line, everything else passes', () =>
     s.login(s.a, 'A');
     s.extra('Work', 'W');
     const ev = (name, args) => ({ hook_event_name: 'UserPromptExpansion', command_name: name, command_args: args });
-    assert.deepEqual(JSON.parse(s.hook(ev('swap', '')).out), { continue: false, stopReason: '✓ swapped to Work', suppressOutput: true });
-    assert.equal(JSON.parse(s.hook(ev('swap', 'status')).out).stopReason, 'on Work, auto swap off');
+    assert.deepEqual(JSON.parse(s.hook(ev('swap', '')).out), { continue: false, stopReason: '\n✓ Switched to Work', suppressOutput: true });
+    assert.equal(JSON.parse(s.hook(ev('swap', 'status')).out).stopReason, '\n• On Work, auto swap off');
     assert.match(JSON.parse(s.hook(ev('swap', 'list')).out).stopReason, /^\n {2}Main\s+saved\n\* Work/, 'tables start on their own line');
-    assert.match(JSON.parse(s.hook(ev('swap', 'add x')).out).stopReason, /from a terminal/);
+    assert.match(JSON.parse(s.hook(ev('swap', 'add x')).out).stopReason, /^\n• Run that one from a terminal/);
+    assert.equal(JSON.parse(s.hook(ev('swap', 'auto on')).out).stopReason, '\n✓ Auto swap on\n  swaps when an account passes 95% or hits its limit');
+    assert.equal(JSON.parse(s.hook(ev('swap', 'auto 20')).out).stopReason, '\n✗ Auto swap threshold has to be between 50 and 100');
+    assert.equal(JSON.parse(s.hook(ev('swap', 'nobody')).out).stopReason, '\n✗ No account called "nobody". Try /swap list');
+    assert.equal(JSON.parse(s.hook(ev('swap', 'work')).out).stopReason, '\n• Already on Work');
     assert.equal(s.hook(ev('review', '')).out, '');
     assert.equal(s.swap(['hook'], { input: 'not json' }).out, '');
-    assert.equal(JSON.parse(s.swap(['hook'], { input: '\uFEFF' + JSON.stringify(ev('swap', 'status')) }).out).stopReason, 'on Work, auto swap off');
+    assert.equal(JSON.parse(s.swap(['hook'], { input: '\uFEFF' + JSON.stringify(ev('swap', 'status')) }).out).stopReason, '\n• On Work, auto swap on at 95%');
     fs.writeFileSync(path.join(s.app, 'config.json'), 'nope');
-    assert.match(JSON.parse(s.hook(ev('swap', '')).out).stopReason, /^cant swap: config\.json/);
+    assert.match(JSON.parse(s.hook(ev('swap', '')).out).stopReason, /^\n✗ Config\.json missing or broken/);
+  } finally { s.done(); }
+});
+
+test('hook: switches show usage under them, a full account says when it resets', () => {
+  const s = sandbox();
+  try {
+    s.install('--names', 'Personal');
+    s.login(s.a, 'A');
+    s.extra('Work', 'W');
+    const ev = args => ({ hook_event_name: 'UserPromptExpansion', command_name: 'swap', command_args: args });
+    const out = args => JSON.parse(s.hook(ev(args)).out).stopReason;
+    const st = s.st();
+    st.usage = { Work: { five_hour: { pct: 12, resets: Date.now() + 60 * MIN }, seven_day: { pct: 33 }, seen: Date.now() } };
+    fs.writeFileSync(path.join(s.app, 'state.json'), JSON.stringify(st));
+    assert.equal(out(''), '\n✓ Switched to Work\n  5h 12% · 7d 33%  (as of just now)');
+    assert.equal(out('status'), '\n• On Work, auto swap off\n  5h 12% · 7d 33%  (as of just now)');
+    const st2 = s.st();
+    st2.usage.Personal = { five_hour: { pct: 100, resets: Date.now() + 90 * MIN }, seen: Date.now() };
+    fs.writeFileSync(path.join(s.app, 'state.json'), JSON.stringify(st2));
+    assert.match(out(''), /^\n✗ Stayed on Work\n {2}Personal is out of usage until \d.*\n {2}\/swap personal switches anyway$/);
+  } finally { s.done(); }
+});
+
+test('colours can be turned on and off', () => {
+  const s = sandbox();
+  try {
+    s.install();
+    s.login(s.a, 'A');
+    s.extra('Work', 'W');
+    const out = args => JSON.parse(s.hook({ hook_event_name: 'UserPromptExpansion', command_name: 'swap', command_args: args }).out).stopReason;
+    assert.match(out('colours on'), /^\n\x1b\[32m✓ Colours on\x1b\[0m\n {2}\x1b\[2mIf \/swap shows bits like/);
+    assert.equal(s.cfg().colour, true);
+    assert.equal(out(''), '\n\x1b[32m✓ Switched to Work\x1b[0m');
+    assert.equal(out('colours off'), '\n• Colours off');
+    assert.equal(out(''), '\n✓ Switched to Main');
+    assert.equal(s.swap(['colours']).out, 'colours on. If /swap shows bits like [32m, turn them off with /swap colours off');
+    assert.match(s.swap(['add', 'colours', '--from', s.b]).err, /is a command/);
   } finally { s.done(); }
 });
 

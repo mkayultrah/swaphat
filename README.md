@@ -71,6 +71,7 @@ In Claude Code:
 /swap auto 85      same, at 85%
 /swap auto off
 /swap doctor       check the setup
+/swap colours on   colour the /swap replies (turn it off if you see things like [32m)
 ```
 
 From a terminal: the same, plus `swaphat add <name>` and `swaphat remove <name>`.

@@ -22,7 +22,7 @@ const USAGE_CACHE_MS = 10 * 60 * 1000;
 const DEFAULT_THRESHOLD = 95;
 const VAULT = 'vault';
 const RESERVED = new Set([
-  'status', 'list', 'auto', 'doctor', 'add', 'remove', 'login', 'swap', 'help', 'next', 'hook', 'export'
+  'status', 'list', 'auto', 'doctor', 'colours', 'colors', 'add', 'remove', 'login', 'swap', 'help', 'next', 'hook', 'export'
 ]);
 const COLOURS = ['35', '36', '33', '32', '34', '31'];
 
@@ -428,7 +428,10 @@ function doSwap(targetName, fromDir, opts = {}) {
     const full = c.accounts.filter(a => s.where[a.name] && a.name !== cur.name && load(s, a.name, now) >= 100);
     if (full.length) {
       const until = full.map(a => { const t = resetsAt(s, a.name, now); return t ? `${a.name} until ${clock(t)}` : a.name; }).join(', ');
-      return { err: `staying on ${cur.name}: ${until} is out of usage. /swap ${full[0].name.toLowerCase()} switches anyway` };
+      return {
+        err: `staying on ${cur.name}: ${until} is out of usage. /swap ${full[0].name.toLowerCase()} switches anyway`,
+        stay: { cur: cur.name, full: full.map(a => ({ name: a.name, until: resetsAt(s, a.name, now) })) },
+      };
     }
     const waiting = c.accounts.find(a => !s.where[a.name]);
     if (waiting) return { err: `cant swap: ${waiting.name} isnt logged in yet. Run "swaphat add ${waiting.name}"` };
@@ -905,6 +908,7 @@ function command(argv) {
     return typeof r === 'string' ? r : r.err;
   }
   if (head === 'doctor') return doctor();
+  if (head === 'colours' || head === 'colors') return setColours(a[1] && a[1].toLowerCase());
   if (head === 'add' || head === 'remove' || head === 'login' || head === 'export') {
     return `run that one from a terminal: swaphat ${a.join(' ')}`;
   }
@@ -914,6 +918,71 @@ function command(argv) {
   const r = swap(target);
   if (r.err) return r.err;
   return r.same ? `already on ${r.now}` : `✓ swapped to ${r.now}`;
+}
+
+function setColours(arg) {
+  const r = withLock(() => {
+    const c = config();
+    c.colour = arg === 'on' ? true : arg === 'off' ? false : !c.colour;
+    saveConfig(c);
+    return c.colour
+      ? 'colours on. If /swap shows bits like [32m, turn them off with /swap colours off'
+      : 'colours off';
+  });
+  return typeof r === 'string' ? r : r.err;
+}
+
+function usageLine(name, now = Date.now()) {
+  const u = state().usage[name];
+  if (!u) return null;
+  const pct = k => (u[k] && u[k].pct != null ? `${windowLoad(u[k], now)}%` : null);
+  const bits = [['5h', pct('five_hour')], ['7d', pct('seven_day')]].filter(([, v]) => v).map(([k, v]) => `${k} ${v}`);
+  return bits.length ? `${bits.join(' · ')}  (as of ${ago(u.seen, now)})` : null;
+}
+
+function pretty(argv) {
+  let c = {};
+  try { c = config(); } catch {}
+  const paint = (code, t) => (c.colour ? `\x1b[${code}m${t}\x1b[0m` : t);
+  const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
+  const ok = t => paint('32', `✓ ${cap(t)}`);
+  const bad = t => paint('33', `✗ ${cap(t)}`);
+  const dot = t => `• ${cap(t)}`;
+  const sub = t => `  ${paint('2', t)}`;
+  const block = lines => `\n${lines.filter(Boolean).join('\n')}`;
+
+  const a = argv.map(x => String(x));
+  const head = (a[0] || '').toLowerCase();
+  if (head === 'list' || head === 'doctor') return block([command(a)]);
+  if (head === 'status') {
+    const t = status();
+    const cur = /^on (.+?), auto/.exec(t);
+    const use = cur && usageLine(cur[1]);
+    return block([dot(t), use && sub(use)]);
+  }
+  if (head === 'auto' || head === 'colours' || head === 'colors') {
+    const t = command(a);
+    try { c = config(); } catch {}
+    if (/between|another swap/.test(t)) return block([bad(t)]);
+    const [first, ...rest] = t.split(/: |\. /);
+    return block([/ on$/.test(first) ? ok(first) : dot(first), ...rest.map(sub)]);
+  }
+  if (['add', 'remove', 'login', 'export'].includes(head)) return block([dot(command(a))]);
+
+  const target = head === '' || head === 'swap' || head === 'next' ? (a[1] ? a.slice(1).join(' ') : null) : a.join(' ');
+  const r = swap(target);
+  if (r.stay) {
+    const f = r.stay.full[0];
+    return block([
+      bad(`stayed on ${r.stay.cur}`),
+      ...r.stay.full.map(x => sub(`${x.name} is out of usage${x.until ? ` until ${clock(x.until)}` : ''}`)),
+      sub(`/swap ${f.name.toLowerCase()} switches anyway`),
+    ]);
+  }
+  if (r.err) return block([bad(r.err.replace(/^cant swap: /, ''))]);
+  if (r.same) return block([dot(`already on ${r.now}`)]);
+  const use = usageLine(r.now);
+  return block([ok(`switched to ${r.now}`), use && sub(use)]);
 }
 
 function continueLater(text) {
@@ -951,11 +1020,10 @@ function hook(raw) {
     if (!/^\/?swap$/i.test(j.command_name || '')) return;
     let msg;
     try {
-      msg = command(String(j.command_args || '').trim().split(/\s+/).filter(Boolean));
+      msg = pretty(String(j.command_args || '').trim().split(/\s+/).filter(Boolean));
     } catch (e) {
-      msg = `cant swap: ${e.message}`;
+      msg = `\n✗ ${e.message.charAt(0).toUpperCase()}${e.message.slice(1)}`;
     }
-    if (msg.includes('\n')) msg = `\n${msg}`;
     process.stdout.write(JSON.stringify({ continue: false, stopReason: msg, suppressOutput: true }));
     return;
   }
@@ -1067,6 +1135,8 @@ if (require.main === module) main(process.argv.slice(2));
 
 module.exports = {
   swap,
+  pretty,
+  setColours,
   status,
   list,
   setAuto,
