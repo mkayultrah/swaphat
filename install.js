@@ -8,6 +8,7 @@ const HOME = os.homedir();
 const SRC = __dirname;
 const FILES = ['swap.js', 'statusline.js', 'continue.ps1'];
 const MARK = '<!-- swaphat -->';
+const COLOURS = ['35', '36', '33', '32', '34', '31'];
 
 function parseArgs(argv) {
   const o = { names: null, secondDir: null, statusline: null, uninstall: false, help: false };
@@ -22,7 +23,7 @@ function parseArgs(argv) {
     else if (a === '-h' || a === '--help') o.help = true;
     else throw new Error(`unknown option ${a}`);
   }
-  if (o.names && o.names.length !== 2) throw new Error('--names takes two names, e.g. --names "Personal,Work"');
+  if (o.names && !o.names.length) throw new Error('--names needs at least one name, e.g. --names "Personal,Work"');
   return o;
 }
 
@@ -80,8 +81,8 @@ function writeCommand(dir, app) {
   }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `---
-description: Swap this session to your other Claude account. /swap status, /swap auto [on|off]
-argument-hint: "[status | auto [on|off]]"
+description: Swap this session to another Claude account. /swap [name], /swap list, /swap status, /swap auto [on|off|NN]
+argument-hint: "[name | list | status | auto [on|off|NN]]"
 disable-model-invocation: true
 ---
 ${MARK}
@@ -115,32 +116,43 @@ function removeLauncher() {
   }
 }
 
+function runSwap(app, args) {
+  return require('child_process').spawnSync(process.execPath, [path.join(app, 'swap.js'), ...args], {
+    encoding: 'utf8', env: { ...process.env, SWAPHAT_HOME: app, CLAUDE_CONFIG_DIR: '' },
+  });
+}
+
 function install(o) {
   const app = appDir();
   fs.mkdirSync(app, { recursive: true });
   if (path.resolve(SRC) !== path.resolve(app)) for (const f of FILES) fs.copyFileSync(path.join(SRC, f), path.join(app, f));
 
   const cfgFile = path.join(app, 'config.json');
-  const prev = readJson(cfgFile, null);
-  const names = o.names || (prev && prev.accounts.map(a => a.name)) || ['Main', 'Second'];
-  const second = o.secondDir || (prev && prev.accounts[1].dir) || '~/.claude-second';
-  const cfg = {
-    accounts: [
-      { name: names[0], dir: '~/.claude', colour: (prev && prev.accounts[0].colour) || '35' },
-      { name: names[1], dir: tilde(expand(second)), colour: (prev && prev.accounts[1].colour) || '36' },
-    ],
-  };
-  if (prev && JSON.stringify(prev.accounts.map(a => a.dir)) !== JSON.stringify(cfg.accounts.map(a => a.dir))) {
-    const st = readJson(path.join(app, 'state.json'), {});
-    if (st.swapped) throw new Error('accounts are swapped right now; run "/swap" once to put them back before changing --second-dir');
+  const stateFile = path.join(app, 'state.json');
+  if (readJson(cfgFile, null)) runSwap(app, ['status']);
+  let cfg = readJson(cfgFile, null);
+  const st = readJson(stateFile, null) || { where: {}, usage: {}, auto: false, lastAuto: 0 };
+  const second = o.secondDir ? tilde(expand(o.secondDir)) : null;
+  if (!cfg) {
+    const names = o.names || ['Main'];
+    cfg = { slots: ['~/.claude'], accounts: names.map((name, i) => ({ name, colour: COLOURS[i % COLOURS.length] })), threshold: 95 };
+    st.where = { [names[0]]: '~/.claude' };
+    if (second) {
+      cfg.slots.push(second);
+      if (!names[1]) cfg.accounts.push({ name: 'Second', colour: COLOURS[1] });
+      st.where[cfg.accounts[1].name] = second;
+    }
+  } else {
+    if (second && !cfg.slots.some(d => expand(d) === expand(second))) cfg.slots.push(second);
+    for (const name of o.names || []) if (!cfg.accounts.some(a => a.name.toLowerCase() === name.toLowerCase()))
+      cfg.accounts.push({ name, colour: COLOURS[cfg.accounts.length % COLOURS.length] });
   }
-  for (const a of cfg.accounts) readJson(path.join(expand(a.dir), 'settings.json'), {});
+  for (const d of cfg.slots) readJson(path.join(expand(d), 'settings.json'), {});
   writeJson(cfgFile, cfg);
-  if (!fs.existsSync(path.join(app, 'state.json'))) writeJson(path.join(app, 'state.json'), { swapped: false, auto: false });
+  writeJson(stateFile, st);
 
-  const dirs = cfg.accounts.map(a => expand(a.dir));
   let note = '';
-  for (const d of dirs) {
+  for (const d of cfg.slots.map(expand)) {
     fs.mkdirSync(d, { recursive: true });
     note = patchSettings(d, app, o.statusline) || note;
     writeCommand(d, app);
@@ -148,26 +160,28 @@ function install(o) {
   const bin = writeLauncher(app);
 
   const run = bin ? 'swaphat' : `node "${path.join(app, 'swap.js')}"`;
-  const doctor = require('child_process').spawnSync(process.execPath, [path.join(app, 'swap.js'), 'doctor'], {
-    encoding: 'utf8', env: { ...process.env, SWAPHAT_HOME: app, CLAUDE_CONFIG_DIR: '' },
-  });
-  console.log(`swaphat installed in ${app}${note}\n`);
-  console.log((doctor.stdout || '').trimEnd());
-  console.log(`\nNext: ${run} login (once, for the second account), then type /swap in Claude Code.`);
-  console.log(`From a terminal: ${run} [status | auto on | doctor]`);
-  console.log('Restart any Claude Code sessions that are already open so they load the hook.');
+  console.log(`swaphat installed in ${app}${note}
+`);
+  console.log((runSwap(app, ['doctor']).stdout || '').trimEnd());
+  const pending = cfg.accounts.filter(a => !st.where[a.name]);
+  console.log('');
+  for (const a of pending) console.log(`Next: ${run} add "${a.name}"   (logs that account in and saves it)`);
+  if (cfg.accounts.length < 2) console.log(`Next: ${run} add <name>   (log in your other account)`);
+  console.log('Then type /swap in Claude Code. Restart any sessions that are already open so they load the hook.');
 }
 
 function uninstall() {
   const app = appDir();
+  const has = fs.existsSync(path.join(app, 'swap.js'));
+  if (has && readJson(path.join(app, 'config.json'), null)) runSwap(app, ['status']);
   const cfg = readJson(path.join(app, 'config.json'), null);
-  const st = readJson(path.join(app, 'state.json'), {});
-  if (cfg && st.swapped && fs.existsSync(path.join(app, 'swap.js'))) {
+  if (has && cfg) {
     process.env.SWAPHAT_HOME = app;
-    const r = require(path.join(app, 'swap.js')).swap();
-    console.log(r.err ? `couldnt swap back: ${r.err}` : 'swapped the accounts back to their own dirs');
+    const r = require(path.join(app, 'swap.js')).exportSaved();
+    if (r.err) throw new Error(`couldnt move your saved logins out (${r.err}), nothing was removed`);
+    for (const [name, dir] of r.exported) console.log(`${name} moved to ${dir} (use it with CLAUDE_CONFIG_DIR=${dir} claude)`);
   }
-  const dirs = cfg ? cfg.accounts.map(a => expand(a.dir)) : [path.join(HOME, '.claude')];
+  const dirs = cfg && cfg.slots ? cfg.slots.map(expand) : cfg ? cfg.accounts.map(a => expand(a.dir)) : [path.join(HOME, '.claude')];
   for (const d of dirs) {
     const file = path.join(d, 'settings.json');
     if (fs.existsSync(file)) {
@@ -182,14 +196,13 @@ function uninstall() {
   }
   removeLauncher();
   fs.rmSync(app, { recursive: true, force: true });
-  console.log('swaphat removed.');
-  if (cfg) console.log(`Your second login is still in ${cfg.accounts[1].dir}; delete that folder if you dont want it.`);
+  console.log('swaphat removed. Every login is still where Claude Code can use it.');
 }
 
 function main(argv) {
   const o = parseArgs(argv);
   if (Number(process.versions.node.split('.')[0]) < 18) throw new Error(`needs node 18 or newer, this is ${process.versions.node}`);
-  if (o.help) return console.log('node install.js [--names "A,B"] [--second-dir DIR] [--statusline|--no-statusline] | --uninstall');
+  if (o.help) return console.log('node install.js [--names "A,B,..."] [--second-dir DIR] [--statusline|--no-statusline] | --uninstall');
   return o.uninstall ? uninstall() : install(o);
 }
 

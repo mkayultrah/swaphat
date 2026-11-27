@@ -2,90 +2,104 @@
 
 <h1 align="center">swaphat</h1>
 
-<p align="center">Type <code>/swap</code> in Claude Code and the next message goes out on your other account.<br>The session keeps running and the chat stays put.</p>
+<p align="center">Type <code>/swap</code> in Claude Code and the next message goes out on another account.<br>The session keeps running and the chat stays put.</p>
 
 <p align="center"><img src="assets/demo.svg" width="760" alt="swapping accounts mid-chat"></p>
 
-I have a personal Claude plan and a work one. I got sick of `/logout`, `/login`, losing my place, and doing it all again when one plan ran out halfway through something. So now I just type `/swap`.
+I have a personal Claude plan and a work one. I got sick of `/logout`, `/login`, losing my place, and doing it all again when a plan ran out halfway through something. Now I type `/swap`, or let it swap for me before I hit the limit.
 
 ## What it does
 
-- `/swap` inside Claude Code switches the session to your other account. The swap itself takes well under a second.
-- `/swap auto on` swaps for you when you hit a usage limit. On Windows it also tells the session to carry on.
-- A status line that shows which account you're on, your 5h and 7d usage, and how much context is used.
+- `/swap` moves the session to your next account, and `/swap work` jumps straight to one. You can have as many accounts as you like.
+- `/swap auto on` swaps for you, either before you hit the limit (at 95% by default) or right when you hit it. It always picks the account with the most room left.
+- `/swap list` shows every account with its last known 5h and 7d usage.
+- A status line shows which account you're on, its usage and your context.
 - `swaphat doctor` tells you what's set up and what isn't.
 
-It's plain Node with no dependencies. Nothing leaves your machine. `/swap` runs as a hook, so it doesn't use a model call.
+It's plain Node with no dependencies. Nothing leaves your machine. `/swap` runs as a hook, so it doesn't use a model call. A swap takes about 0.1 s.
 
-If you want more than two accounts, a usage dashboard or rotation strategies, use [realiti4/claude-swap](https://github.com/realiti4/claude-swap) instead. It's a much bigger tool. swaphat only does the in-chat swap.
+If you'd rather have a terminal dashboard and rotation strategies, take a look at [realiti4/claude-swap](https://github.com/realiti4/claude-swap). It's a bigger tool that works from outside Claude Code. swaphat is the in-chat one.
 
 ## How it works
 
-Claude Code keeps its login in `<config dir>/.credentials.json`. On macOS it's in the Keychain instead. Either way it re-reads the login when it changes.
+Claude Code keeps its login in `~/.claude/.credentials.json`, or in the Keychain on macOS, and re-reads it when it changes. swaphat keeps your other logins parked: in `~/.swaphat/vault` on Windows and Linux, and in the Keychain on macOS. `/swap` puts the current login in the vault and the next one in its place. The session picks it up on its next message.
 
-You keep one account logged in to `~/.claude` and the other to a second dir (`~/.claude-second`). `/swap` exchanges the two logins, and any session on `~/.claude` picks up the other account on its next message.
-
-- Logins are exchanged, never copied, so a refresh token only ever lives in one place.
-- Only the claude.ai login moves. MCP tokens and the rest of the file stay where they are.
-- A lock stops two swaps from running at once. If the second write fails, the first one gets undone.
-- It refuses to swap when both dirs hold the same account, because that's usually a login mistake.
+- A login only ever lives in one place. It's moved, never copied.
+- Only the claude.ai login moves. MCP tokens and the rest of the file stay put. The account info `/status` shows moves along with it.
+- A lock stops two swaps from clashing. If a write fails halfway, the swap is undone.
+- It won't save the same account twice. The same email in two orgs counts as two accounts, which is how Team plans work.
 
 ## Install
 
 Needs Node 18+ and Claude Code logged in with a claude.ai account (Pro, Max, Team or Enterprise).
 
 ```sh
-npx github:mkayultrah/swaphat install --names "Personal,Work"
+npx github:mkayultrah/swaphat install --names Personal
 ```
 
-Or clone it and run `node install.js --names "Personal,Work"`.
-
-The first name is the account you're logged in with now. Then log in the second one:
+or clone it and run `node install.js --names Personal`. That names the account you're logged in with right now. Then add the others:
 
 ```sh
-swaphat login
+swaphat add Work
 ```
 
-Pick the **other** account in the browser. If you're in more than one org under the same email, switch org on claude.ai first. Then restart any open Claude Code sessions.
+That opens the usual Claude login in your browser. Pick the account you want, and swaphat saves it. Do it again for each account. Then restart any open Claude Code sessions so they load the hook.
 
-`swaphat` is available as a command if `~/.local/bin` is on your PATH, which it usually is if you installed Claude Code with its own installer. If it isn't, run `node ~/.swaphat/swap.js` instead.
+Already have an account logged in to another config dir? Run `swaphat add Work --from ~/.claude-work` to move it in.
 
-The installer copies itself to `~/.swaphat`. It adds two hooks, a `/swap` command and a status line to `settings.json` in both dirs. Your other settings stay as they are. It backs up `settings.json` once, refuses to touch one it can't parse, and is safe to run again.
+If `~/.local/bin` is on your PATH you get a `swaphat` command. It usually is if you installed Claude Code with its own installer. If it isn't, use `node ~/.swaphat/swap.js`.
+
+The installer copies itself to `~/.swaphat`, then adds two hooks, a `/swap` command and a status line to `~/.claude/settings.json`. The rest of the file stays as it is. It backs the file up once, won't touch a `settings.json` it can't parse, and is safe to run again.
 
 ```
---names "A,B"      account names, default Main,Second
---second-dir DIR   where the second login lives, default ~/.claude-second
+--names "A,B"      account names; the first is the one logged in now
+--second-dir DIR   also run Claude from DIR and swap between the two dirs
 --statusline       replace your current status line
 --no-statusline    don't add the status line
 ```
 
 ## Usage
 
+In Claude Code:
+
 ```
-/swap              switch accounts
-/swap status       which account you're on
-/swap auto on      swap when you hit a usage limit
+/swap              next account
+/swap work         that account (a prefix works too)
+/swap list         all accounts, where they are, last usage
+/swap status       which account this session is on
+/swap auto on      swap at 95% or when a limit hits
+/swap auto 85      same, at 85%
 /swap auto off
+/swap doctor       check the setup
 ```
 
-Same from a terminal: `swaphat`, `swaphat status`, `swaphat auto on`, `swaphat doctor`.
+From a terminal: the same, plus `swaphat add <name>` and `swaphat remove <name>`.
 
-Auto swap won't fire twice within 5 minutes, so two tapped-out accounts don't bounce back and forth.
+Auto swap won't fire twice within 5 minutes. If every other account is over the line too, it stays where it is.
+
+```
+$ swaphat list
+* Personal  ~/.claude        5h 96%  7d 41%  (just now)
+  Work      saved            5h 12%  7d 33%  (2h ago)
+  Spare     saved            5h 0%   7d 5%   (1d ago)
+auto swap on at 95%
+```
 
 ## Platforms
 
 | | |
 |---|---|
 | Windows | tested end to end |
-| Linux | same file layout as Windows, covered by CI |
-| macOS | swaps the Keychain items. CI tests it against a real keychain, but I haven't run it on a live Mac session yet |
+| Linux | same layout as Windows, covered by CI |
+| macOS | Keychain swaps tested in CI against a real keychain. I haven't used it in a live session on a Mac yet |
 
 ## Things to know
 
-- A swap moves the account for every session on either dir, not just the one you typed in.
+- Every session on `~/.claude` swaps together, since they share one login.
 - Claude Code adds the "Operation stopped by hook:" bit itself.
+- The usage numbers come from the status line, so an account's numbers are only as fresh as the last time you used it.
 - From Git Bash, `claude -p "/swap"` needs `MSYS_NO_PATHCONV=1`, otherwise Git Bash turns `/swap` into a file path.
-- Every swap gets logged to `~/.swaphat/swap.log`.
+- Every swap goes in `~/.swaphat/swap.log`.
 
 ## Uninstall
 
@@ -93,7 +107,7 @@ Auto swap won't fire twice within 5 minutes, so two tapped-out accounts don't bo
 swaphat uninstall
 ```
 
-It swaps the accounts back if needed, then removes the hooks, the command, the status line and `~/.swaphat`. The second login stays in `~/.claude-second`.
+Saved accounts get moved out to `~/.claude-<name>` so you don't lose them. You can use one with `CLAUDE_CONFIG_DIR=~/.claude-work claude`. Then it removes the hooks, the command, the status line and `~/.swaphat`.
 
 ## Tests
 
@@ -101,7 +115,7 @@ It swaps the accounts back if needed, then removes the hooks, the command, the s
 npm test
 ```
 
-They run in a throwaway home dir, so your real logins are never touched.
+27 tests covering about 87% of the code. They run in a throwaway home dir, so your real logins are never touched.
 
 ## License
 
