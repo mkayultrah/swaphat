@@ -26,7 +26,6 @@ const RESERVED = new Set([
 ]);
 const COLOURS = ['35', '36', '33', '32', '34', '31'];
 
-// --- Path & File Utilities ---
 
 const expand = p => {
   const raw = String(p)
@@ -81,7 +80,6 @@ const log = msg => {
   } catch {}
 };
 
-// --- Locking (PID-verified, race-safe O_EXCL with bounded spin) ---
 
 function isPidAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -153,7 +151,6 @@ function withLock(fn) {
   }
 }
 
-// --- Config & State ---
 
 function config() {
   const c = readJson(at('config.json'), null);
@@ -199,7 +196,6 @@ function state() {
 const saveState = s => writeJson(at('state.json'), s);
 const getThreshold = c => (typeof c.threshold === 'number' && !Number.isNaN(c.threshold) ? c.threshold : DEFAULT_THRESHOLD);
 
-// --- Claude Directory & OAuth Helpers ---
 
 const defaultDir = () => path.join(HOME, '.claude');
 const isDefault = dir => norm(dir) === norm(defaultDir());
@@ -232,7 +228,6 @@ function findAccount(c, q) {
   return hits.length === 1 ? hits[0] : null;
 }
 
-// --- macOS Keychain & Credential Stores ---
 
 const quoteInteractive = s => `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 
@@ -353,7 +348,6 @@ function vaultStore(name) {
   };
 }
 
-// --- Usage & Account Selection ---
 
 function windowLoad(w, now) {
   if (!w || w.pct == null) return 0;
@@ -391,7 +385,6 @@ function sameIdentity(credA, acctA, credB, acctB) {
   return !!(idA && idB && idA === idB);
 }
 
-// --- Core Swap Operation (Transactional with Rollback) ---
 
 function doSwap(targetName, fromDir, opts = {}) {
   const now = Date.now();
@@ -533,7 +526,6 @@ function doSwap(targetName, fromDir, opts = {}) {
 
 const swap = (name, opts) => withLock(() => doSwap(name, thisDir(), opts));
 
-// --- Status, List & Auto Configuration ---
 
 function ago(t, now = Date.now()) {
   if (!t || typeof t !== 'number') return 'unknown';
@@ -594,7 +586,6 @@ function setAuto(arg) {
   });
 }
 
-// --- Account Management (Add, Remove, Export) ---
 
 function validName(name) {
   if (!/^[\w][\w .-]{0,31}$/.test(name || '')) {
@@ -687,7 +678,6 @@ function add(name, from) {
   });
 
   if (r.status !== 0) {
-    fs.rmSync(tmp, { recursive: true, force: true });
     const manual = WIN ? `$env:CLAUDE_CONFIG_DIR="${tmp}"; claude` : `CLAUDE_CONFIG_DIR="${tmp}" claude`;
     return { err: `that didnt finish. Do it by hand: run\n  ${manual}\nthen /login, /exit, and\n  swaphat add "${name}" --from "${tmp}"` };
   }
@@ -744,7 +734,6 @@ function exportSaved() {
   });
 }
 
-// --- Usage Tracking & Statusline Hook ---
 
 function pctOf(w) {
   if (!w) return null;
@@ -804,7 +793,6 @@ function onStatus(j, now = Date.now()) {
   return r;
 }
 
-// --- Diagnostics ---
 
 function doctor() {
   const out = [];
@@ -871,14 +859,16 @@ function doctor() {
   return out.join('\n');
 }
 
-// --- Command & Hook Dispatch ---
 
 function command(argv) {
   const a = argv.map(x => String(x));
   const head = (a[0] || '').toLowerCase();
   if (head === 'status') return status();
   if (head === 'list') return list();
-  if (head === 'auto') return setAuto(a[1] && a[1].toLowerCase());
+  if (head === 'auto') {
+    const r = setAuto(a[1] && a[1].toLowerCase());
+    return typeof r === 'string' ? r : r.err;
+  }
   if (head === 'doctor') return doctor();
   if (head === 'add' || head === 'remove' || head === 'login' || head === 'export') {
     return `run that one from a terminal: swaphat ${a.join(' ')}`;
@@ -962,7 +952,6 @@ function hook(raw) {
   }
 }
 
-// --- CLI Entrypoint ---
 
 function parseAddArgs(rest) {
   let from = null;

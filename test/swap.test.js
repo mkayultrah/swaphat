@@ -372,6 +372,10 @@ test('auto: on, off and threshold', () => {
     assert.match(s.swap(['auto', '80']).out, /passes 80%/);
     assert.equal(s.cfg().threshold, 80);
     assert.match(s.swap(['auto', '20']).out, /between 50 and 100/);
+    fs.writeFileSync(path.join(s.app, 'swap.lock'), '');
+    const busy = JSON.parse(s.hook({ hook_event_name: 'UserPromptExpansion', command_name: 'swap', command_args: 'auto off' }).out);
+    assert.match(busy.stopReason, /another swap is running/, 'a busy lock still answers with one line');
+    fs.rmSync(path.join(s.app, 'swap.lock'));
     assert.equal(s.swap(['status']).out, 'on Main, auto swap on at 80%');
   } finally { s.done(); }
 });
